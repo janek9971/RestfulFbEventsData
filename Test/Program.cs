@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -7,58 +9,48 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
-using HtmlAgilityPack;
-using Newtonsoft.Json;
+using System.Threading;
 
 namespace Test
 {
-   static class Program
+    class Program
     {
         private static void Main()
         {
-//            Thread.CurrentThread.CurrentCulture = new CultureInfo("en-es");
+            Thread.CurrentThread.CurrentCulture = new CultureInfo("pl-PL");
 
             Console.OutputEncoding = Encoding.Unicode;
             var sw = new Stopwatch();
 
             sw.Start();
             var beginStringData = $@"variables=%7B%22pageID%22%3A%22";
-           var endStringData = $@"%22%7D&doc_id=2473596855989497";
-           var pageID = "453101831380213";
-           var stringData = $@"{beginStringData}{pageID}{endStringData}";
+            var endStringData = $@"%22%7D&doc_id=2473596855989497";
+            var pageID = "139321759439286";
+            var stringData = $@"{beginStringData}{pageID}{endStringData}";
             //    var cubano = "variables=%7B%22pageID%22%3A%221723473481303362%22%7D&doc_id=2473596855989497";
             //   stodola = cubano;
-             string url = "https://www.facebook.com/api/graphql/";
-             string languageCode = "pl-pl";
+            const string url = "https://www.facebook.com/api/graphql/";
+            const string languageCode = "pl-pl";
+            var ins = new Program(); ;
+            var fullResponse = ins.GetFullResponse(url, stringData, languageCode);
 
-          var fullResponse = GetFullResponse(url, stringData, languageCode);
-       
-          var listOfEvents = GetListOfEvents(fullResponse);
-          sw.Stop();
-          Console.WriteLine(sw.ElapsedMilliseconds);
-            foreach (var events in listOfEvents)
-          {
-            Console.WriteLine(events.TimeRange);
-            Console.WriteLine(events.ShortTimeLabel);
-            Console.WriteLine(events.ShortDateLabel);
-            Console.WriteLine(events.LocalLocation);
-            Console.WriteLine(events.Guests);
-            Console.WriteLine(events.Title);
-            Console.WriteLine(events.GlobalLocation);
-            Console.WriteLine(events.BuyTicketUrl);
-          }
+            var listOfEvents = ins.GetListOfEvents(fullResponse, pageID);
+            sw.Stop();
+            Console.WriteLine(sw.ElapsedMilliseconds);
+
+            Console.WriteLine(listOfEvents);
         }
 
-        public static string GetFullResponse(string url, string stringData, string languageCode)
+        public string GetFullResponse(string url, string stringData, string languageCode)
         {
-            var request = (HttpWebRequest)WebRequest.Create(url);
+            var request = (HttpWebRequest) WebRequest.Create(url);
 
             var data = Encoding.ASCII.GetBytes(stringData); // or UTF8
-            /*            request.Headers.Add("Accept-Language", "es-es;");
-                              request.Headers.Add("Accept-Encoding:", "gzip,deflate,br");
-                              request.Headers.Add("Cookie",""); to set authorization
-                              request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-                        request.Headers.Add("Origin", "https://es-es.facebook.com");*/
+          /*request.Headers.Add("Accept-Language", "es-es;");
+            request.Headers.Add("Accept-Encoding:", "gzip,deflate,br");
+            request.Headers.Add("Cookie",""); to set authorization
+            request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+            request.Headers.Add("Origin", "https://es-es.facebook.com");*/
             request.Method = "POST";
             request.Host = $"{languageCode}.facebook.com";
             request.Accept = "*/*";
@@ -70,48 +62,61 @@ namespace Test
             var newStream = request.GetRequestStream();
             newStream.Write(data, 0, data.Length);
             var resStream = request.GetResponse().GetResponseStream();
-            var readStream = new StreamReader(resStream ?? throw new Exception("emptyStrem"), Encoding.GetEncoding("ISO-8859-1")).ReadToEnd();
+            var readStream =
+                new StreamReader(resStream ?? throw new Exception("emptyStrem"), Encoding.GetEncoding("ISO-8859-1"))
+                    .ReadToEnd();
             newStream.Close();
             return readStream;
         }
-        private static List<EventsData> GetListOfEvents(string fullResponse)
+
+        private JObject GetListOfEvents(string fullResponse, string pageId)
         {
-   
-        
             var encoded = EncodeNonAsciiCharacters(fullResponse);
             var decoded = DecodeEncodedNonAsciiCharacters(encoded);
-            var strings = decoded.Split(new[] {"cursor"}, StringSplitOptions.None).ToList();
+            var strings = decoded.Split(new[] { "cursor" }, StringSplitOptions.None).ToList();
             strings.RemoveRange(strings.Count - 2, 2);
             var listOfEvents = new List<EventsData>();
             foreach (var club in strings)
             {
-                var eventID = GetBetween(club, "\"eventID\": \"", "\""); //needed to join event
+                var eventId = GetBetween(club, "\"eventID\": \"", "\""); //needed to join event
                 var guestsText = GetBetween(club, "\"text\": \"", "\"");
                 var guests = new string(guestsText.Where(char.IsDigit).ToArray());
-                var timeRange = GetBetween(club, "start\": \"", "\"");
-                var shortTimeLabel = GetBetween(club, "shortTimeLabel\": \"", "\"");
-                var shortDateLabel = GetBetween(club, "shortDateLabel\": \"", "\"");
+                var timeRangeUtc = GetBetween(club, "start\": \"", "\"");
+                var timeRangeLocal = DateTimeOffset.Parse(timeRangeUtc).UtcDateTime.ToLocalTime()
+                    .ToString(CultureInfo.CurrentCulture);
+                var dayOfTheWeek =
+                    CultureInfo.CurrentCulture.DateTimeFormat.DayNames[
+                        (int)DateTimeOffset.Parse(timeRangeUtc).UtcDateTime.DayOfWeek];
+                //                var shortTimeLabel = GetBetween(club, "shortTimeLabel\": \"", "\"");
+                //                var shortDateLabel = GetBetween(club, "shortDateLabel\": \"", "\"");
                 var localLocation = GetBetween(club,
                     "\"__typename\": \"Page\",\n                        \"contextual_name\": \"", "\"");
                 var globalLocation = GetBetween(club, "cityContextualName\": \"", "\"");
                 //  var timeZoneLocation = getBetween(club, "timezone\": \"", "\"");
                 var buyTicketUrl = GetBetween(club, "event_buy_ticket_url\": \"", "\"");
-                var name = GetBetween(club, "preassigned_discount_note\": null,\n                     \"name\": \"", "\"");
+                var name = GetBetween(club, "preassigned_discount_note\": null,\n                     \"name\": \"",
+                    "\",").Replace(@"\", string.Empty);
+                //               var test = DateTimeOffset.Parse(shortTimeLabel).Utc.ToLocalTime().ToString(CultureInfo.CurrentCulture);
+                //                CultureInfo pol = new CultureInfo("pl-PL");
+
+                //                var test2 = DateTimeOffset.Parse(timeRangeUtc).UtcDateTime.DayOfWeek;
+                //                var test3 = pol.DateTimeFormat.DayNames[(int)test2];
+
                 listOfEvents.Add(new EventsData
                 {
-                    EventId = eventID,
+                    EventId = eventId,
                     Title = name,
                     Guests = int.Parse(guests),
-                    TimeRange = timeRange,
-                    ShortTimeLabel = shortTimeLabel,
-                    ShortDateLabel = shortDateLabel,
+                    TimeRange = timeRangeLocal,
+                    DayOfTheWeek = dayOfTheWeek,
                     LocalLocation = localLocation,
                     GlobalLocation = globalLocation,
                     BuyTicketUrl = buyTicketUrl,
-                  
                 });
             }
 
+            var jsonClubs = new JObject();
+            jsonClubs[$"Events_{pageId}"] = JToken.FromObject(listOfEvents);
             foreach (var singleItem in listOfEvents)
             {
                 JsonSerializer serializer = new JsonSerializer();
@@ -123,19 +128,22 @@ namespace Test
                 }
             }
 
-            return listOfEvents;
+            return jsonClubs;
         }
-    
-        public static string GetBetween(string strSource, string strStart, string strEnd)
+
+        public string GetBetween(string strSource, string strStart, string strEnd)
         {
-            if (!strSource.Contains(strStart) || !strSource.Contains(strEnd)) return "";
+            if (!strSource.Contains(strStart) || !strSource.Contains(strEnd))
+            {
+                return "";
+            }
+
             var start = strSource.IndexOf(strStart, 0, StringComparison.Ordinal) + strStart.Length;
             var end = strSource.IndexOf(strEnd, start, StringComparison.Ordinal);
             return strSource.Substring(start, end - start);
-
         }
 
-        private static string DecodeEncodedNonAsciiCharacters(string value)
+        private string DecodeEncodedNonAsciiCharacters(string value)
         {
             return Regex.Replace(
                 value,
@@ -143,7 +151,7 @@ namespace Test
                 m => ((char)int.Parse(m.Groups["Value"].Value, NumberStyles.HexNumber)).ToString());
         }
 
-        private static string EncodeNonAsciiCharacters(string value)
+        private string EncodeNonAsciiCharacters(string value)
         {
             var sb = new StringBuilder();
             foreach (var c in value)
@@ -159,9 +167,8 @@ namespace Test
                     sb.Append(c);
                 }
             }
+
             return sb.ToString();
         }
-
-      
     }
 }

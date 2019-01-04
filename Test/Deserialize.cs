@@ -10,8 +10,7 @@ namespace Test
     public class EventsData
     {
         public string TimeRange { get; set; }
-        public string ShortTimeLabel { get; set; }
-        public string ShortDateLabel { get; set; }
+        public string DayOfTheWeek { get; set; }
         public int Guests { get; set; } //text
         public string Title { get; set; } //name[1]
         public string LocalLocation { get; set; }
